@@ -27,6 +27,8 @@ services:
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
       - ./requirements.txt:/requirements.txt
+      - ./ingestion:/opt/airflow/ingestion
+      - ./warehouse:/opt/airflow/warehouse
     command: >
       bash -c "pip install -r /requirements.txt &&
       airflow db migrate &&
@@ -48,6 +50,8 @@ services:
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
       - ./requirements.txt:/requirements.txt
+      - ./ingestion:/opt/airflow/ingestion
+      - ./warehouse:/opt/airflow/warehouse
     ports:
       - "8080:8080"
     command: >
@@ -71,6 +75,8 @@ services:
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
       - ./requirements.txt:/requirements.txt
+      - ./ingestion:/opt/airflow/ingestion
+      - ./warehouse:/opt/airflow/warehouse
     command: >
       bash -c "
       pip install -r /requirements.txt &&
