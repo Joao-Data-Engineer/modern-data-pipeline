@@ -1,27 +1,60 @@
 version: "3.8"
 
 services:
-  postgres:
+
+  # ──────────────────────────────────────────
+  # 1) Airflow metadata DB  (internal only)
+  # ──────────────────────────────────────────
+  postgres_airflow:
     image: postgres:15
-    container_name: mdp_postgres
+    container_name: mdp_postgres_airflow
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_airflow_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+
+  # ──────────────────────────────────────────
+  # 2) Data Warehouse DB  (your actual data)
+  # ──────────────────────────────────────────
+  postgres_dw:
+    image: postgres:15
+    container_name: mdp_postgres_dw
     environment:
       POSTGRES_USER: mdp
       POSTGRES_PASSWORD: mdp
       POSTGRES_DB: mdp_dw
     ports:
-      - "5432:5432"
+      - "5432:5432"           # exposed so dbt / psql can connect from host
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_dw_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "mdp"]
+      interval: 5s
+      retries: 5
 
+  # ──────────────────────────────────────────
+  # 3) Airflow init (runs once)
+  # ──────────────────────────────────────────
   airflow-init:
     image: apache/airflow:2.9.3
     container_name: mdp_airflow_init
     depends_on:
-      - postgres
+      postgres_airflow:
+        condition: service_healthy
+      postgres_dw:
+        condition: service_healthy
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://mdp:mdp@postgres:5432/mdp_dw
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_airflow:5432/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      # DW connection passed as env var for the loader
+      DW_CONN: postgresql+psycopg2://mdp:mdp@postgres_dw:5432/mdp_dw
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -32,8 +65,20 @@ services:
     command: >
       bash -c "pip install -r /requirements.txt &&
       airflow db migrate &&
-      airflow users create --username admin --password admin --firstname admin --lastname admin --role Admin --email admin@example.com || true"
+      airflow connections add 'postgres_dw' \
+        --conn-type postgres \
+        --conn-host postgres_dw \
+        --conn-schema mdp_dw \
+        --conn-login mdp \
+        --conn-password mdp \
+        --conn-port 5432 || true &&
+      airflow users create --username admin --password admin \
+        --firstname admin --lastname admin \
+        --role Admin --email admin@example.com || true"
 
+  # ──────────────────────────────────────────
+  # 4) Airflow webserver
+  # ──────────────────────────────────────────
   airflow-webserver:
     image: apache/airflow:2.9.3
     container_name: mdp_airflow_webserver
@@ -41,10 +86,11 @@ services:
       - airflow-init
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://mdp:mdp@postgres:5432/mdp_dw
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_airflow:5432/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
       PYTHONPATH: /opt/airflow/dags:/opt/airflow
+      DW_CONN: postgresql+psycopg2://mdp:mdp@postgres_dw:5432/mdp_dw
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -55,11 +101,11 @@ services:
     ports:
       - "8080:8080"
     command: >
-      bash -c "
-      pip install -r /requirements.txt &&
-      airflow webserver
-      "
+      bash -c "pip install -r /requirements.txt && airflow webserver"
 
+  # ──────────────────────────────────────────
+  # 5) Airflow scheduler
+  # ──────────────────────────────────────────
   airflow-scheduler:
     image: apache/airflow:2.9.3
     container_name: mdp_airflow_scheduler
@@ -67,9 +113,10 @@ services:
       - airflow-webserver
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://mdp:mdp@postgres:5432/mdp_dw
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_airflow:5432/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       PYTHONPATH: /opt/airflow/dags:/opt/airflow
+      DW_CONN: postgresql+psycopg2://mdp:mdp@postgres_dw:5432/mdp_dw
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -78,10 +125,8 @@ services:
       - ./ingestion:/opt/airflow/ingestion
       - ./warehouse:/opt/airflow/warehouse
     command: >
-      bash -c "
-      pip install -r /requirements.txt &&
-      airflow scheduler
-      "
+      bash -c "pip install -r /requirements.txt && airflow scheduler"
 
 volumes:
-  postgres_data:
+  postgres_airflow_data:
+  postgres_dw_data:

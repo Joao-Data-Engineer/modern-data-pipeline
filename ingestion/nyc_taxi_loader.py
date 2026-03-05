@@ -7,11 +7,11 @@ from sqlalchemy import create_engine, text
 BASE_URL = "https://d37ci6vzurychx.cloudfront.net/trip-data"
 SOURCE_NAME = "nyc_taxi_yellow"
 
-POSTGRES_CONN = os.getenv("AIRFLOW__DATABASE__SQL_ALCHEMY_CONN") 
+# ✅ Apunta al Data Warehouse, NO a la DB de Airflow
+POSTGRES_CONN = os.getenv("DW_CONN")
 
 
 def month_to_filename(month: str) -> str:
-   
     return f"yellow_tripdata_{month}.parquet"
 
 def download_parquet(month: str) -> bytes:
@@ -21,7 +21,6 @@ def download_parquet(month: str) -> bytes:
     return r.content
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-  
     rename_map = {
         "VendorID": "vendor_id",
         "tpep_pickup_datetime": "tpep_pickup_datetime",
@@ -43,16 +42,16 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         "congestion_surcharge": "congestion_surcharge",
         "Airport_fee": "airport_fee",
     }
-   
     for k, v in list(rename_map.items()):
         if k in df.columns:
             df = df.rename(columns={k: v})
-    
+
     expected = [
-        "vendor_id","tpep_pickup_datetime","tpep_dropoff_datetime","passenger_count","trip_distance",
-        "ratecode_id","store_and_fwd_flag","pu_location_id","do_location_id","payment_type",
-        "fare_amount","extra","mta_tax","tip_amount","tolls_amount","improvement_surcharge",
-        "total_amount","congestion_surcharge","airport_fee"
+        "vendor_id", "tpep_pickup_datetime", "tpep_dropoff_datetime",
+        "passenger_count", "trip_distance", "ratecode_id", "store_and_fwd_flag",
+        "pu_location_id", "do_location_id", "payment_type", "fare_amount",
+        "extra", "mta_tax", "tip_amount", "tolls_amount", "improvement_surcharge",
+        "total_amount", "congestion_surcharge", "airport_fee"
     ]
     for c in expected:
         if c not in df.columns:
@@ -61,7 +60,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def get_engine():
     if not POSTGRES_CONN:
-        raise RuntimeError("Missing AIRFLOW__DATABASE__SQL_ALCHEMY_CONN env var inside container.")
+        raise RuntimeError("Missing DW_CONN env var. Check docker-compose.yml.")
     return create_engine(POSTGRES_CONN)
 
 def ensure_watermark(engine):
@@ -99,7 +98,6 @@ def load_month(month: str):
     parquet_bytes = download_parquet(month)
     df = pd.read_parquet(io.BytesIO(parquet_bytes))
     df = normalize_columns(df)
-    
     df["source_file"] = month_to_filename(month)
 
     with engine.begin() as conn:
@@ -117,12 +115,11 @@ def load_month(month: str):
         chunksize=50_000,
         method="multi",
     )
-    
+
     month_date = pd.to_datetime(month + "-01").date()
     set_last_loaded_month(engine, month_date)
 
     return {"month": month, "rows_loaded": len(df)}
 
 if __name__ == "__main__":
-  
     print(load_month("2024-01"))

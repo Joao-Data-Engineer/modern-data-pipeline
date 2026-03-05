@@ -14,10 +14,8 @@ def compute_next_month_to_load(**context):
     engine = get_engine()
     last = get_last_loaded_month(engine)
     if last is None:
-        
         next_month = "2024-01"
     else:
-        
         y = last.year
         m = last.month
         if m == 12:
@@ -27,9 +25,9 @@ def compute_next_month_to_load(**context):
             m += 1
         next_month = f"{y:04d}-{m:02d}"
 
-    
     now = datetime.utcnow()
-    if (int(next_month[:4]) > now.year) or (int(next_month[:4]) == now.year and int(next_month[5:7]) > now.month):
+    if (int(next_month[:4]) > now.year) or \
+       (int(next_month[:4]) == now.year and int(next_month[5:7]) > now.month):
         return None
 
     return next_month
@@ -48,11 +46,12 @@ with DAG(
     schedule_interval="@daily",
     catchup=False,
     tags=["portfolio", "nyc-taxi", "incremental"],
+    template_searchpath=["/opt/airflow", "/opt/airflow/dags", "/opt/airflow/warehouse"],
 ) as dag:
 
     create_schema_and_tables = PostgresOperator(
         task_id="create_schema_and_tables",
-        postgres_conn_id="postgres_default",
+        postgres_conn_id="postgres_dw",   # ✅ antes era "postgres_default"
         sql="warehouse/schema.sql",
     )
 
