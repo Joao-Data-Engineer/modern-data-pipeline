@@ -99,11 +99,24 @@ def load_month(month: str):
     parquet_bytes = download_parquet(month)
     df = pd.read_parquet(io.BytesIO(parquet_bytes))
     df = normalize_columns(df)
+    
     df["source_file"] = month_to_filename(month)
 
-    
-    df.to_sql("nyc_taxi_yellow_trips", engine, schema="raw", if_exists="append", index=False, chunksize=50_000, method="multi")
+    with engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM raw.nyc_taxi_yellow_trips WHERE source_file = :f"),
+            {"f": month_to_filename(month)},
+        )
 
+    df.to_sql(
+        "nyc_taxi_yellow_trips",
+        engine,
+        schema="raw",
+        if_exists="append",
+        index=False,
+        chunksize=50_000,
+        method="multi",
+    )
     
     month_date = pd.to_datetime(month + "-01").date()
     set_last_loaded_month(engine, month_date)
