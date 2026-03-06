@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, text
 
 log = logging.getLogger(__name__)
 
-BASE_URL   = "https://d37ci6vzurychx.cloudfront.net/trip-data"
+BASE_URL = "https://d37ci6vzurychx.cloudfront.net/trip-data"
 SOURCE_NAME = "nyc_taxi_yellow"
 
 POSTGRES_CONN = os.getenv("DW_CONN")
@@ -18,8 +18,10 @@ POSTGRES_CONN = os.getenv("DW_CONN")
 # Helpers
 # ──────────────────────────────────────────
 
+
 def month_to_filename(month: str) -> str:
     return f"yellow_tripdata_{month}.parquet"
+
 
 def get_engine():
     if not POSTGRES_CONN:
@@ -31,23 +33,30 @@ def get_engine():
 # Watermark
 # ──────────────────────────────────────────
 
+
 def ensure_watermark(engine):
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS raw.ingestion_watermark (
                 source_name TEXT PRIMARY KEY,
                 last_loaded_month DATE NOT NULL
             )
-        """))
+        """)
+        )
+
 
 def get_last_loaded_month(engine):
     ensure_watermark(engine)
     with engine.begin() as conn:
         row = conn.execute(
-            text("SELECT last_loaded_month FROM raw.ingestion_watermark WHERE source_name = :s"),
+            text(
+                "SELECT last_loaded_month FROM raw.ingestion_watermark WHERE source_name = :s"
+            ),
             {"s": SOURCE_NAME},
         ).fetchone()
         return row[0] if row else None
+
 
 def set_last_loaded_month(engine, month_date):
     with engine.begin() as conn:
@@ -65,8 +74,18 @@ def set_last_loaded_month(engine, month_date):
 # Audit
 # ──────────────────────────────────────────
 
-def write_audit(engine, *, month, source_file, status, rows_loaded=None,
-                error_message=None, started_at, finished_at):
+
+def write_audit(
+    engine,
+    *,
+    month,
+    source_file,
+    status,
+    rows_loaded=None,
+    error_message=None,
+    started_at,
+    finished_at,
+):
     duration = (finished_at - started_at).total_seconds()
     with engine.begin() as conn:
         conn.execute(
@@ -79,26 +98,30 @@ def write_audit(engine, *, month, source_file, status, rows_loaded=None,
                      :err, :started, :finished, :dur)
             """),
             {
-                "src":     SOURCE_NAME,
-                "month":   month,
-                "file":    source_file,
-                "status":  status,
-                "rows":    rows_loaded,
-                "err":     error_message,
+                "src": SOURCE_NAME,
+                "month": month,
+                "file": source_file,
+                "status": status,
+                "rows": rows_loaded,
+                "err": error_message,
                 "started": started_at,
                 "finished": finished_at,
-                "dur":     duration,
+                "dur": duration,
             },
         )
     log.info(
         "[audit] month=%s status=%s rows=%s duration=%.1fs",
-        month, status, rows_loaded, duration
+        month,
+        status,
+        rows_loaded,
+        duration,
     )
 
 
 # ──────────────────────────────────────────
 # Download + normalize
 # ──────────────────────────────────────────
+
 
 def download_parquet(month: str) -> bytes:
     url = f"{BASE_URL}/{month_to_filename(month)}"
@@ -108,38 +131,53 @@ def download_parquet(month: str) -> bytes:
     log.info("[download] %.1f MB received", len(r.content) / 1_000_000)
     return r.content
 
+
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     rename_map = {
-        "VendorID":             "vendor_id",
+        "VendorID": "vendor_id",
         "tpep_pickup_datetime": "tpep_pickup_datetime",
-        "tpep_dropoff_datetime":"tpep_dropoff_datetime",
-        "passenger_count":      "passenger_count",
-        "trip_distance":        "trip_distance",
-        "RatecodeID":           "ratecode_id",
-        "store_and_fwd_flag":   "store_and_fwd_flag",
-        "PULocationID":         "pu_location_id",
-        "DOLocationID":         "do_location_id",
-        "payment_type":         "payment_type",
-        "fare_amount":          "fare_amount",
-        "extra":                "extra",
-        "mta_tax":              "mta_tax",
-        "tip_amount":           "tip_amount",
-        "tolls_amount":         "tolls_amount",
-        "improvement_surcharge":"improvement_surcharge",
-        "total_amount":         "total_amount",
+        "tpep_dropoff_datetime": "tpep_dropoff_datetime",
+        "passenger_count": "passenger_count",
+        "trip_distance": "trip_distance",
+        "RatecodeID": "ratecode_id",
+        "store_and_fwd_flag": "store_and_fwd_flag",
+        "PULocationID": "pu_location_id",
+        "DOLocationID": "do_location_id",
+        "payment_type": "payment_type",
+        "fare_amount": "fare_amount",
+        "extra": "extra",
+        "mta_tax": "mta_tax",
+        "tip_amount": "tip_amount",
+        "tolls_amount": "tolls_amount",
+        "improvement_surcharge": "improvement_surcharge",
+        "total_amount": "total_amount",
         "congestion_surcharge": "congestion_surcharge",
-        "Airport_fee":          "airport_fee",
+        "Airport_fee": "airport_fee",
     }
     for k, v in list(rename_map.items()):
         if k in df.columns:
             df = df.rename(columns={k: v})
 
     expected = [
-        "vendor_id","tpep_pickup_datetime","tpep_dropoff_datetime",
-        "passenger_count","trip_distance","ratecode_id","store_and_fwd_flag",
-        "pu_location_id","do_location_id","payment_type","fare_amount",
-        "extra","mta_tax","tip_amount","tolls_amount","improvement_surcharge",
-        "total_amount","congestion_surcharge","airport_fee"
+        "vendor_id",
+        "tpep_pickup_datetime",
+        "tpep_dropoff_datetime",
+        "passenger_count",
+        "trip_distance",
+        "ratecode_id",
+        "store_and_fwd_flag",
+        "pu_location_id",
+        "do_location_id",
+        "payment_type",
+        "fare_amount",
+        "extra",
+        "mta_tax",
+        "tip_amount",
+        "tolls_amount",
+        "improvement_surcharge",
+        "total_amount",
+        "congestion_surcharge",
+        "airport_fee",
     ]
     for c in expected:
         if c not in df.columns:
@@ -151,8 +189,9 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 # Main load function
 # ──────────────────────────────────────────
 
+
 def load_month(month: str):
-    engine     = get_engine()
+    engine = get_engine()
     source_file = month_to_filename(month)
     started_at = datetime.utcnow()
 

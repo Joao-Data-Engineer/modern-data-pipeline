@@ -10,6 +10,7 @@ DEFAULT_ARGS = {
     "retries": 1,
 }
 
+
 def compute_next_month_to_load(**context):
     engine = get_engine()
     last = get_last_loaded_month(engine)
@@ -26,11 +27,13 @@ def compute_next_month_to_load(**context):
         next_month = f"{y:04d}-{m:02d}"
 
     now = datetime.utcnow()
-    if (int(next_month[:4]) > now.year) or \
-       (int(next_month[:4]) == now.year and int(next_month[5:7]) > now.month):
+    if (int(next_month[:4]) > now.year) or (
+        int(next_month[:4]) == now.year and int(next_month[5:7]) > now.month
+    ):
         return None
 
     return next_month
+
 
 def load_next_month(**context):
     ti = context["ti"]
@@ -38,6 +41,7 @@ def load_next_month(**context):
     if not month:
         return {"skipped": True, "reason": "No new month to load"}
     return load_month(month)
+
 
 with DAG(
     dag_id="nyc_taxi_yellow_incremental",
@@ -48,10 +52,9 @@ with DAG(
     tags=["portfolio", "nyc-taxi", "incremental"],
     template_searchpath=["/opt/airflow", "/opt/airflow/dags", "/opt/airflow/warehouse"],
 ) as dag:
-
     create_schema_and_tables = PostgresOperator(
         task_id="create_schema_and_tables",
-        postgres_conn_id="postgres_dw",   # ✅ antes era "postgres_default"
+        postgres_conn_id="postgres_dw",  # ✅ antes era "postgres_default"
         sql="warehouse/schema.sql",
     )
 
