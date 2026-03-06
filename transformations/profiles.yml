@@ -3,10 +3,10 @@ nyc_taxi:
   outputs:
     dev:
       type: postgres
-      host: localhost        # desde tu máquina (puerto 5432 expuesto)
-      port: 5432
-      user: mdp
-      password: mdp
-      dbname: mdp_dw
-      schema: staging        # schema por defecto, cada modelo lo override
+      host: "{{ env_var('DBT_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_PORT', '5432') | int }}"
+      user: "{{ env_var('DBT_USER', 'mdp') }}"
+      password: "{{ env_var('DBT_PASSWORD', 'mdp') }}"
+      dbname: "{{ env_var('DBT_DBNAME', 'mdp_dw') }}"
+      schema: staging
       threads: 4
