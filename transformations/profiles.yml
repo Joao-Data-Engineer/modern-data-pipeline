@@ -1,0 +1,12 @@
+nyc_taxi:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost        # desde tu máquina (puerto 5432 expuesto)
+      port: 5432
+      user: mdp
+      password: mdp
+      dbname: mdp_dw
+      schema: staging        # schema por defecto, cada modelo lo override
+      threads: 4

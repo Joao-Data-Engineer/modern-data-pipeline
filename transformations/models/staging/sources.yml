@@ -1,0 +1,23 @@
+# models/staging/sources.yml
+# Define la fuente raw para que dbt pueda referenciarla con {{ source() }}
+
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    description: "Raw ingestion layer — datos cargados directamente desde NYC TLC"
+    tables:
+      - name: nyc_taxi_yellow_trips
+        description: "Viajes del taxi amarillo de NYC, cargados mensualmente"
+        columns:
+          - name: tpep_pickup_datetime
+            description: "Timestamp de inicio del viaje"
+          - name: tpep_dropoff_datetime
+            description: "Timestamp de fin del viaje"
+          - name: total_amount
+            description: "Monto total cobrado al pasajero"
+          - name: trip_distance
+            description: "Distancia del viaje en millas"
+          - name: source_file
+            description: "Archivo parquet de origen (e.g. yellow_tripdata_2024-01.parquet)"

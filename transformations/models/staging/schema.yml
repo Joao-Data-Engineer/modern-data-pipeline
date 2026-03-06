@@ -1,0 +1,51 @@
+version: 2
+
+models:
+  - name: stg_yellow_trips
+    description: >
+      Staging layer del taxi amarillo de NYC.
+      Aplica limpieza de columnas, renombres estandarizados y filtros básicos de calidad.
+      Materializado como VIEW sobre raw.nyc_taxi_yellow_trips.
+
+    columns:
+      - name: pickup_at
+        description: "Timestamp de inicio del viaje"
+        tests:
+          - not_null
+
+      - name: dropoff_at
+        description: "Timestamp de fin del viaje"
+        tests:
+          - not_null
+
+      - name: total_amount
+        description: "Monto total cobrado al pasajero"
+        tests:
+          - not_null
+
+      - name: trip_distance
+        description: "Distancia del viaje en millas"
+        tests:
+          - not_null
+
+      - name: pu_location_id
+        description: "ID de zona de pickup"
+        tests:
+          - not_null
+
+      - name: do_location_id
+        description: "ID de zona de dropoff"
+        tests:
+          - not_null
+
+      - name: payment_type
+        description: "Tipo de pago: 0=Unknown, 1=Credit, 2=Cash, 3=No charge, 4=Dispute, 5=Unknown, 6=Voided"
+        tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1, 2, 3, 4, 5, 6]
+
+      - name: trip_duration_minutes
+        description: "Duración calculada del viaje en minutos"
+        tests:
+          - not_null

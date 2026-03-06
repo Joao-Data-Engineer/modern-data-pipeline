@@ -1,0 +1,54 @@
+# models/marts/schema.yml
+version: 2
+
+models:
+  - name: mart_trips_daily
+    description: >
+      Agregados diarios de viajes del taxi amarillo de NYC.
+      Incluye volumen, revenue, distancia, duración y propinas por día.
+      Materializado como TABLE.
+
+    columns:
+      - name: trip_date
+        description: "Fecha del viaje (truncado a día)"
+        tests:
+          - not_null
+          - unique
+
+      - name: total_trips
+        description: "Cantidad total de viajes del día"
+        tests:
+          - not_null
+
+      - name: total_revenue
+        description: "Revenue total del día en USD"
+        tests:
+          - not_null
+
+      - name: avg_fare
+        description: "Tarifa promedio por viaje"
+        tests:
+          - not_null
+
+  - name: mart_trips_zone
+    description: >
+      Agregados por zona de pickup.
+      Permite analizar qué zonas generan más volumen y revenue.
+      Materializado como TABLE.
+
+    columns:
+      - name: pickup_zone_id
+        description: "ID de zona de pickup (TLC Taxi Zone)"
+        tests:
+          - not_null
+          - unique
+
+      - name: total_trips
+        description: "Total de viajes originados en esta zona"
+        tests:
+          - not_null
+
+      - name: total_revenue
+        description: "Revenue total generado por la zona"
+        tests:
+          - not_null
