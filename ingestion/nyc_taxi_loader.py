@@ -1,67 +1,36 @@
 import os
 import io
+import logging
+import time
 import requests
 import pandas as pd
+from datetime import datetime
 from sqlalchemy import create_engine, text
 
-BASE_URL = "https://d37ci6vzurychx.cloudfront.net/trip-data"
+log = logging.getLogger(__name__)
+
+BASE_URL   = "https://d37ci6vzurychx.cloudfront.net/trip-data"
 SOURCE_NAME = "nyc_taxi_yellow"
 
-# ✅ Apunta al Data Warehouse, NO a la DB de Airflow
 POSTGRES_CONN = os.getenv("DW_CONN")
 
 
+# ──────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────
+
 def month_to_filename(month: str) -> str:
     return f"yellow_tripdata_{month}.parquet"
-
-def download_parquet(month: str) -> bytes:
-    url = f"{BASE_URL}/{month_to_filename(month)}"
-    r = requests.get(url, timeout=120)
-    r.raise_for_status()
-    return r.content
-
-def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    rename_map = {
-        "VendorID": "vendor_id",
-        "tpep_pickup_datetime": "tpep_pickup_datetime",
-        "tpep_dropoff_datetime": "tpep_dropoff_datetime",
-        "passenger_count": "passenger_count",
-        "trip_distance": "trip_distance",
-        "RatecodeID": "ratecode_id",
-        "store_and_fwd_flag": "store_and_fwd_flag",
-        "PULocationID": "pu_location_id",
-        "DOLocationID": "do_location_id",
-        "payment_type": "payment_type",
-        "fare_amount": "fare_amount",
-        "extra": "extra",
-        "mta_tax": "mta_tax",
-        "tip_amount": "tip_amount",
-        "tolls_amount": "tolls_amount",
-        "improvement_surcharge": "improvement_surcharge",
-        "total_amount": "total_amount",
-        "congestion_surcharge": "congestion_surcharge",
-        "Airport_fee": "airport_fee",
-    }
-    for k, v in list(rename_map.items()):
-        if k in df.columns:
-            df = df.rename(columns={k: v})
-
-    expected = [
-        "vendor_id", "tpep_pickup_datetime", "tpep_dropoff_datetime",
-        "passenger_count", "trip_distance", "ratecode_id", "store_and_fwd_flag",
-        "pu_location_id", "do_location_id", "payment_type", "fare_amount",
-        "extra", "mta_tax", "tip_amount", "tolls_amount", "improvement_surcharge",
-        "total_amount", "congestion_surcharge", "airport_fee"
-    ]
-    for c in expected:
-        if c not in df.columns:
-            df[c] = None
-    return df[expected]
 
 def get_engine():
     if not POSTGRES_CONN:
         raise RuntimeError("Missing DW_CONN env var. Check docker-compose.yml.")
     return create_engine(POSTGRES_CONN)
+
+
+# ──────────────────────────────────────────
+# Watermark
+# ──────────────────────────────────────────
 
 def ensure_watermark(engine):
     with engine.begin() as conn:
@@ -92,34 +61,171 @@ def set_last_loaded_month(engine, month_date):
             {"s": SOURCE_NAME, "m": month_date},
         )
 
-def load_month(month: str):
-    engine = get_engine()
 
-    parquet_bytes = download_parquet(month)
-    df = pd.read_parquet(io.BytesIO(parquet_bytes))
-    df = normalize_columns(df)
-    df["source_file"] = month_to_filename(month)
+# ──────────────────────────────────────────
+# Audit
+# ──────────────────────────────────────────
 
+def write_audit(engine, *, month, source_file, status, rows_loaded=None,
+                error_message=None, started_at, finished_at):
+    duration = (finished_at - started_at).total_seconds()
     with engine.begin() as conn:
         conn.execute(
-            text("DELETE FROM raw.nyc_taxi_yellow_trips WHERE source_file = :f"),
-            {"f": month_to_filename(month)},
+            text("""
+                INSERT INTO raw.ingestion_audit
+                    (source_name, month, source_file, status, rows_loaded,
+                     error_message, started_at, finished_at, duration_secs)
+                VALUES
+                    (:src, :month, :file, :status, :rows,
+                     :err, :started, :finished, :dur)
+            """),
+            {
+                "src":     SOURCE_NAME,
+                "month":   month,
+                "file":    source_file,
+                "status":  status,
+                "rows":    rows_loaded,
+                "err":     error_message,
+                "started": started_at,
+                "finished": finished_at,
+                "dur":     duration,
+            },
         )
-
-    df.to_sql(
-        "nyc_taxi_yellow_trips",
-        engine,
-        schema="raw",
-        if_exists="append",
-        index=False,
-        chunksize=50_000,
-        method="multi",
+    log.info(
+        "[audit] month=%s status=%s rows=%s duration=%.1fs",
+        month, status, rows_loaded, duration
     )
 
-    month_date = pd.to_datetime(month + "-01").date()
-    set_last_loaded_month(engine, month_date)
 
-    return {"month": month, "rows_loaded": len(df)}
+# ──────────────────────────────────────────
+# Download + normalize
+# ──────────────────────────────────────────
+
+def download_parquet(month: str) -> bytes:
+    url = f"{BASE_URL}/{month_to_filename(month)}"
+    log.info("[download] Fetching %s", url)
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+    log.info("[download] %.1f MB received", len(r.content) / 1_000_000)
+    return r.content
+
+def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    rename_map = {
+        "VendorID":             "vendor_id",
+        "tpep_pickup_datetime": "tpep_pickup_datetime",
+        "tpep_dropoff_datetime":"tpep_dropoff_datetime",
+        "passenger_count":      "passenger_count",
+        "trip_distance":        "trip_distance",
+        "RatecodeID":           "ratecode_id",
+        "store_and_fwd_flag":   "store_and_fwd_flag",
+        "PULocationID":         "pu_location_id",
+        "DOLocationID":         "do_location_id",
+        "payment_type":         "payment_type",
+        "fare_amount":          "fare_amount",
+        "extra":                "extra",
+        "mta_tax":              "mta_tax",
+        "tip_amount":           "tip_amount",
+        "tolls_amount":         "tolls_amount",
+        "improvement_surcharge":"improvement_surcharge",
+        "total_amount":         "total_amount",
+        "congestion_surcharge": "congestion_surcharge",
+        "Airport_fee":          "airport_fee",
+    }
+    for k, v in list(rename_map.items()):
+        if k in df.columns:
+            df = df.rename(columns={k: v})
+
+    expected = [
+        "vendor_id","tpep_pickup_datetime","tpep_dropoff_datetime",
+        "passenger_count","trip_distance","ratecode_id","store_and_fwd_flag",
+        "pu_location_id","do_location_id","payment_type","fare_amount",
+        "extra","mta_tax","tip_amount","tolls_amount","improvement_surcharge",
+        "total_amount","congestion_surcharge","airport_fee"
+    ]
+    for c in expected:
+        if c not in df.columns:
+            df[c] = None
+    return df[expected]
+
+
+# ──────────────────────────────────────────
+# Main load function
+# ──────────────────────────────────────────
+
+def load_month(month: str):
+    engine     = get_engine()
+    source_file = month_to_filename(month)
+    started_at = datetime.utcnow()
+
+    log.info("=" * 60)
+    log.info("[pipeline] START  month=%s  file=%s", month, source_file)
+
+    try:
+        # Download
+        parquet_bytes = download_parquet(month)
+        df = pd.read_parquet(io.BytesIO(parquet_bytes))
+        log.info("[load] Rows in parquet: %d", len(df))
+
+        # Normalize
+        df = normalize_columns(df)
+        df["source_file"] = source_file
+
+        # Delete existing rows for this month (idempotent)
+        with engine.begin() as conn:
+            deleted = conn.execute(
+                text("DELETE FROM raw.nyc_taxi_yellow_trips WHERE source_file = :f"),
+                {"f": source_file},
+            ).rowcount
+        if deleted:
+            log.info("[load] Deleted %d existing rows for %s", deleted, source_file)
+
+        # Insert
+        log.info("[load] Inserting %d rows into raw.nyc_taxi_yellow_trips...", len(df))
+        df.to_sql(
+            "nyc_taxi_yellow_trips",
+            engine,
+            schema="raw",
+            if_exists="append",
+            index=False,
+            chunksize=50_000,
+            method="multi",
+        )
+
+        # Update watermark
+        month_date = pd.to_datetime(month + "-01").date()
+        set_last_loaded_month(engine, month_date)
+
+        finished_at = datetime.utcnow()
+        write_audit(
+            engine,
+            month=month,
+            source_file=source_file,
+            status="success",
+            rows_loaded=len(df),
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+
+        log.info("[pipeline] END  month=%s  rows=%d", month, len(df))
+        log.info("=" * 60)
+        return {"month": month, "rows_loaded": len(df)}
+
+    except Exception as e:
+        finished_at = datetime.utcnow()
+        log.error("[pipeline] FAILED  month=%s  error=%s", month, str(e))
+        write_audit(
+            engine,
+            month=month,
+            source_file=source_file,
+            status="error",
+            rows_loaded=None,
+            error_message=str(e),
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+        raise
+
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     print(load_month("2024-01"))
