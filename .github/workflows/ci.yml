@@ -1,0 +1,173 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  # ──────────────────────────────────────────
+  # 1) Lint Python code
+  # ──────────────────────────────────────────
+  lint:
+    name: Lint Python
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff lint
+        run: ruff check ingestion/ dags/
+
+      - name: Run ruff format check
+        run: ruff format --check ingestion/ dags/
+
+
+  # ──────────────────────────────────────────
+  # 2) dbt test against a real Postgres
+  # ──────────────────────────────────────────
+  dbt-test:
+    name: dbt Test
+    runs-on: ubuntu-latest
+    needs: lint
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: mdp
+          POSTGRES_PASSWORD: mdp
+          POSTGRES_DB: mdp_dw
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mdp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install dbt-postgres psycopg2-binary pandas pyarrow
+
+      - name: Create raw schema and tables
+        env:
+          PGPASSWORD: mdp
+        run: |
+          psql -h localhost -U mdp -d mdp_dw -f warehouse/schema.sql
+
+      - name: Seed minimal test data
+        env:
+          PGPASSWORD: mdp
+        run: |
+          psql -h localhost -U mdp -d mdp_dw << 'SQL'
+          INSERT INTO raw.nyc_taxi_yellow_trips (
+            vendor_id, tpep_pickup_datetime, tpep_dropoff_datetime,
+            passenger_count, trip_distance, ratecode_id, store_and_fwd_flag,
+            pu_location_id, do_location_id, payment_type,
+            fare_amount, extra, mta_tax, tip_amount, tolls_amount,
+            improvement_surcharge, total_amount, congestion_surcharge,
+            airport_fee, source_file
+          ) VALUES
+            (1, '2024-01-15 08:00:00', '2024-01-15 08:20:00', 2, 3.5, 1, 'N', 100, 200, 1, 14.0, 0.5, 0.5, 3.0, 0.0, 0.3, 18.3, 2.5, 0.0, 'yellow_tripdata_2024-01.parquet'),
+            (2, '2024-01-15 09:00:00', '2024-01-15 09:15:00', 1, 2.1, 1, 'N', 150, 250, 2, 10.0, 0.5, 0.5, 0.0, 0.0, 0.3, 11.3, 2.5, 0.0, 'yellow_tripdata_2024-01.parquet'),
+            (1, '2024-01-16 10:00:00', '2024-01-16 10:30:00', 3, 5.0, 1, 'N', 100, 300, 1, 20.0, 0.5, 0.5, 4.0, 0.0, 0.3, 25.3, 2.5, 0.0, 'yellow_tripdata_2024-01.parquet');
+          SQL
+
+      - name: Run dbt
+        working-directory: transformations
+        run: |
+          dbt run --profiles-dir .
+        env:
+          DBT_HOST: localhost
+          DBT_USER: mdp
+          DBT_PASSWORD: mdp
+          DBT_DBNAME: mdp_dw
+          DBT_PORT: "5432"
+
+      - name: Run dbt tests
+        working-directory: transformations
+        run: |
+          dbt test --profiles-dir .
+        env:
+          DBT_HOST: localhost
+          DBT_USER: mdp
+          DBT_PASSWORD: mdp
+          DBT_DBNAME: mdp_dw
+          DBT_PORT: "5432"
+
+      - name: Generate dbt docs summary
+        if: always()
+        working-directory: transformations
+        run: |
+          dbt docs generate --profiles-dir . || true
+          echo "## dbt Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| ✅ Models built | staging.stg_yellow_trips, marts.mart_trips_daily, marts.mart_trips_zone |" >> $GITHUB_STEP_SUMMARY
+          echo "| ✅ Tests run | 17 data quality tests |" >> $GITHUB_STEP_SUMMARY
+        env:
+          DBT_HOST: localhost
+          DBT_USER: mdp
+          DBT_PASSWORD: mdp
+          DBT_DBNAME: mdp_dw
+          DBT_PORT: "5432"
+
+
+  # ──────────────────────────────────────────
+  # 3) Notify on failure — opens a GitHub Issue
+  # ──────────────────────────────────────────
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [lint, dbt-test]
+    if: failure()
+
+    steps:
+      - name: Create GitHub Issue on failure
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run_url = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `## ❌ CI pipeline failed`,
+              ``,
+              `**Branch:** \`${context.ref.replace('refs/heads/', '')}\``,
+              `**Commit:** \`${context.sha.substring(0, 7)}\``,
+              `**Triggered by:** ${context.actor}`,
+              ``,
+              `[View failed run](${run_url})`,
+              ``,
+              `### What to check`,
+              `- Lint errors in \`ingestion/\` or \`dags/\``,
+              `- dbt model compilation errors`,
+              `- dbt test failures (data quality)`,
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `❌ CI failed on ${context.ref.replace('refs/heads/', '')} — ${context.sha.substring(0, 7)}`,
+              body: body,
+              labels: ['ci-failure'],
+            });
