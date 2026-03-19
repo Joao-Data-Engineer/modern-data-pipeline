@@ -3,10 +3,10 @@ nyc_taxi:
   outputs:
     dev:
       type: postgres
-      host: "{{ env_var('DBT_HOST', 'localhost') }}"
-      port: "{{ env_var('DBT_PORT', '5432') | int }}"
-      user: "{{ env_var('DBT_USER', 'mdp') }}"
-      password: "{{ env_var('DBT_PASSWORD', 'mdp') }}"
-      dbname: "{{ env_var('DBT_DBNAME', 'mdp_dw') }}"
+      host: "{{ env_var('DBT_HOST') }}"
+      port: "{{ env_var('DBT_PORT') | int }}"
+      user: "{{ env_var('DBT_USER') }}"
+      password: "{{ env_var('DBT_PASSWORD') }}"
+      dbname: "{{ env_var('DBT_DBNAME') }}"
       schema: staging
       threads: 4
