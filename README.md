@@ -164,6 +164,71 @@ modern-data-pipeline/
 
 ---
 
+## Troubleshooting
+
+**`dbt: command not found` / not recognized**
+
+dbt is installed but not in the PATH. Fix for the current session:
+
+```bash
+# Windows (PowerShell)
+$env:PATH += ";$env:LOCALAPPDATA\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\Scripts"
+
+# Or use the full path directly
+python -m dbt run --profiles-dir .
+```
+
+To fix permanently: add the Scripts folder to your system PATH in Settings → System → Environment Variables.
+
+---
+
+**`dbt test` fails with `Option '--profiles-dir' requires an argument`**
+
+The `.` (dot) at the end is required — it tells dbt to look for `profiles.yml` in the current directory:
+
+```bash
+# Correct
+dbt test --profiles-dir .
+
+# Wrong — missing the dot
+dbt test --profiles-dir
+```
+
+---
+
+**Airflow webserver not starting / `localhost:8080` unreachable**
+
+The webserver waits for `airflow-init` to complete. Check init logs:
+
+```bash
+docker logs mdp_airflow_init
+```
+
+If init is still running, wait 30 seconds and refresh. If it exited with errors, run:
+
+```bash
+docker compose down -v --remove-orphans
+docker compose up -d
+```
+
+---
+
+**Port 5432 already allocated**
+
+Another process is using the port. Find and stop it:
+
+```bash
+# Windows
+netstat -ano | findstr :5432
+taskkill /PID <pid> /F
+
+# Then restart
+docker compose down -v --remove-orphans
+docker compose up -d
+```
+
+---
+
 ## Key Design Decisions
 
 **Two separate Postgres instances** — `postgres_airflow` handles Airflow internal metadata only. `postgres_dw` is the actual data warehouse. Mixing both in one DB is an anti-pattern in production.
