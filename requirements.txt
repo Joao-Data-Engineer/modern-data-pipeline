@@ -2,3 +2,8 @@ pandas>=2.1.4,<2.2
 pyarrow==16.1.0
 requests==2.32.3
 psycopg2-binary==2.9.9
+sqlalchemy>=1.4.28,<2.0
+tenacity>=8.2,<9.0
+pytest>=7.4
+pytest-mock>=3.12
+pytest-cov>=4.1

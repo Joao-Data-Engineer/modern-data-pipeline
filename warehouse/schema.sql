@@ -19,15 +19,15 @@ CREATE TABLE IF NOT EXISTS raw.nyc_taxi_yellow_trips (
     pu_location_id         INT,
     do_location_id         INT,
     payment_type           INT,
-    fare_amount            DOUBLE PRECISION,
-    extra                  DOUBLE PRECISION,
-    mta_tax                DOUBLE PRECISION,
-    tip_amount             DOUBLE PRECISION,
-    tolls_amount           DOUBLE PRECISION,
-    improvement_surcharge  DOUBLE PRECISION,
-    total_amount           DOUBLE PRECISION,
-    congestion_surcharge   DOUBLE PRECISION,
-    airport_fee            DOUBLE PRECISION,
+    fare_amount            NUMERIC(10, 2),
+    extra                  NUMERIC(10, 2),
+    mta_tax                NUMERIC(10, 2),
+    tip_amount             NUMERIC(10, 2),
+    tolls_amount           NUMERIC(10, 2),
+    improvement_surcharge  NUMERIC(10, 2),
+    total_amount           NUMERIC(10, 2),
+    congestion_surcharge   NUMERIC(10, 2),
+    airport_fee            NUMERIC(10, 2),
     source_file            TEXT,
     loaded_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -43,10 +43,11 @@ CREATE TABLE IF NOT EXISTS raw.ingestion_audit (
     error_message  TEXT,
     started_at     TIMESTAMP   NOT NULL,
     finished_at    TIMESTAMP,
-    duration_secs  DOUBLE PRECISION
+    duration_secs  NUMERIC(10, 2)
 );
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_yellow_pickup_dt ON raw.nyc_taxi_yellow_trips (tpep_pickup_datetime);
 CREATE INDEX IF NOT EXISTS idx_yellow_pu_loc    ON raw.nyc_taxi_yellow_trips (pu_location_id);
+CREATE INDEX IF NOT EXISTS idx_yellow_source_file ON raw.nyc_taxi_yellow_trips (source_file);
 CREATE INDEX IF NOT EXISTS idx_audit_source     ON raw.ingestion_audit (source_name, month);

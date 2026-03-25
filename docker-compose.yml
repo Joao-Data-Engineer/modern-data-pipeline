@@ -59,23 +59,14 @@ services:
       - ./requirements.txt:/requirements.txt
       - ./ingestion:/opt/airflow/ingestion
       - ./warehouse:/opt/airflow/warehouse
-    command: >
-      bash -c "pip install -r /requirements.txt &&
-      airflow db migrate &&
-      airflow connections add 'postgres_dw'
-        --conn-type postgres
-        --conn-host postgres_dw
-        --conn-schema ${DW_DB}
-        --conn-login ${DW_USER}
-        --conn-password ${DW_PASSWORD}
-        --conn-port 5432 || true &&
-      airflow users create
-        --username ${AIRFLOW_ADMIN_USER}
-        --password ${AIRFLOW_ADMIN_PASSWORD}
-        --firstname admin
-        --lastname admin
-        --role Admin
-        --email ${AIRFLOW_ADMIN_EMAIL} || true"
+    command:
+      - bash
+      - -c
+      - |
+        pip install -r /requirements.txt &&
+        airflow db migrate &&
+        airflow connections add 'postgres_dw' --conn-type postgres --conn-host postgres_dw --conn-schema ${DW_DB} --conn-login ${DW_USER} --conn-password ${DW_PASSWORD} --conn-port 5432 || true &&
+        airflow users create --username ${AIRFLOW_ADMIN_USER} --password ${AIRFLOW_ADMIN_PASSWORD} --firstname admin --lastname admin --role Admin --email ${AIRFLOW_ADMIN_EMAIL} || true
 
   # ──────────────────────────────────────────
   # 4) Airflow webserver

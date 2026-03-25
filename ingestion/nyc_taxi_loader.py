@@ -1,10 +1,14 @@
-import os
 import io
 import logging
-import requests
+import os
+from datetime import datetime, timezone
+from typing import Any
+
 import pandas as pd
-from datetime import datetime
+import requests
 from sqlalchemy import create_engine, text
+from sqlalchemy.pool import QueuePool
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +30,13 @@ def month_to_filename(month: str) -> str:
 def get_engine():
     if not POSTGRES_CONN:
         raise RuntimeError("Missing DW_CONN env var. Check docker-compose.yml.")
-    return create_engine(POSTGRES_CONN)
+    return create_engine(
+        POSTGRES_CONN,
+        poolclass=QueuePool,
+        pool_size=5,
+        max_overflow=10,
+        pool_pre_ping=True,
+    )
 
 
 # ──────────────────────────────────────────
@@ -34,7 +44,7 @@ def get_engine():
 # ──────────────────────────────────────────
 
 
-def ensure_watermark(engine):
+def ensure_watermark(engine) -> None:
     with engine.begin() as conn:
         conn.execute(
             text("""
@@ -46,7 +56,7 @@ def ensure_watermark(engine):
         )
 
 
-def get_last_loaded_month(engine):
+def get_last_loaded_month(engine) -> Any:
     ensure_watermark(engine)
     with engine.begin() as conn:
         row = conn.execute(
@@ -58,7 +68,7 @@ def get_last_loaded_month(engine):
         return row[0] if row else None
 
 
-def set_last_loaded_month(engine, month_date):
+def set_last_loaded_month(engine, month_date) -> None:
     with engine.begin() as conn:
         conn.execute(
             text("""
@@ -78,14 +88,14 @@ def set_last_loaded_month(engine, month_date):
 def write_audit(
     engine,
     *,
-    month,
-    source_file,
-    status,
-    rows_loaded=None,
-    error_message=None,
-    started_at,
-    finished_at,
-):
+    month: str,
+    source_file: str,
+    status: str,
+    rows_loaded: int | None = None,
+    error_message: str | None = None,
+    started_at: datetime,
+    finished_at: datetime,
+) -> None:
     duration = (finished_at - started_at).total_seconds()
     with engine.begin() as conn:
         conn.execute(
@@ -123,6 +133,11 @@ def write_audit(
 # ──────────────────────────────────────────
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=30),
+    reraise=True,
+)
 def download_parquet(month: str) -> bytes:
     url = f"{BASE_URL}/{month_to_filename(month)}"
     log.info("[download] Fetching %s", url)
@@ -154,9 +169,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         "congestion_surcharge": "congestion_surcharge",
         "Airport_fee": "airport_fee",
     }
-    for k, v in list(rename_map.items()):
-        if k in df.columns:
-            df = df.rename(columns={k: v})
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
 
     expected = [
         "vendor_id",
@@ -190,10 +203,10 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 # ──────────────────────────────────────────
 
 
-def load_month(month: str):
+def load_month(month: str) -> dict[str, Any]:
     engine = get_engine()
     source_file = month_to_filename(month)
-    started_at = datetime.utcnow()
+    started_at = datetime.now(timezone.utc)
 
     log.info("=" * 60)
     log.info("[pipeline] START  month=%s  file=%s", month, source_file)
@@ -233,7 +246,7 @@ def load_month(month: str):
         month_date = pd.to_datetime(month + "-01").date()
         set_last_loaded_month(engine, month_date)
 
-        finished_at = datetime.utcnow()
+        finished_at = datetime.now(timezone.utc)
         write_audit(
             engine,
             month=month,
@@ -249,7 +262,7 @@ def load_month(month: str):
         return {"month": month, "rows_loaded": len(df)}
 
     except Exception as e:
-        finished_at = datetime.utcnow()
+        finished_at = datetime.now(timezone.utc)
         log.error("[pipeline] FAILED  month=%s  error=%s", month, str(e))
         write_audit(
             engine,
