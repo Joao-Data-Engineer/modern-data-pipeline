@@ -10,3 +10,23 @@ nyc_taxi:
       dbname: "{{ env_var('DBT_DBNAME') }}"
       schema: staging
       threads: 4
+
+    ci:
+      type: postgres
+      host: "{{ env_var('DBT_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_PORT', '5432') | int }}"
+      user: "{{ env_var('DBT_USER') }}"
+      password: "{{ env_var('DBT_PASSWORD') }}"
+      dbname: "{{ env_var('DBT_DBNAME') }}"
+      schema: staging
+      threads: 4
+
+    prod:
+      type: postgres
+      host: "{{ env_var('DBT_PROD_HOST') }}"
+      port: "{{ env_var('DBT_PROD_PORT', '5432') | int }}"
+      user: "{{ env_var('DBT_PROD_USER') }}"
+      password: "{{ env_var('DBT_PROD_PASSWORD') }}"
+      dbname: "{{ env_var('DBT_PROD_DBNAME') }}"
+      schema: staging
+      threads: 8

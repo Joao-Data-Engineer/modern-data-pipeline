@@ -1,6 +1,20 @@
 -- models/marts/mart_trips_daily.sql
+
+{{
+    config(
+        materialized='incremental',
+        unique_key='trip_date',
+        on_schema_change='fail'
+    )
+}}
+
 with trips as (
     select * from {{ ref('stg_yellow_trips') }}
+
+    {% if is_incremental() %}
+    -- lookback 2 days to handle late-arriving records
+    where pickup_at::date >= (select max(trip_date) - interval '2 days' from {{ this }})
+    {% endif %}
 ),
 
 daily as (

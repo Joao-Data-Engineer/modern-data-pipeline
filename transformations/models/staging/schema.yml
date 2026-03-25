@@ -22,11 +22,27 @@ models:
         description: "Monto total cobrado al pasajero"
         tests:
           - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 1000
+              strictly: false
 
       - name: trip_distance
         description: "Distancia del viaje en millas"
         tests:
           - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 500
+              strictly: false
+
+      - name: passenger_count
+        description: "Número de pasajeros"
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 9
+              strictly: false
 
       - name: pu_location_id
         description: "ID de zona de pickup"
@@ -42,10 +58,13 @@ models:
         description: "Tipo de pago: 0=Unknown, 1=Credit, 2=Cash, 3=No charge, 4=Dispute, 5=Unknown, 6=Voided"
         tests:
           - accepted_values:
-              arguments:
-                values: [0, 1, 2, 3, 4, 5, 6]
+              values: [0, 1, 2, 3, 4, 5, 6]
 
       - name: trip_duration_minutes
         description: "Duración calculada del viaje en minutos"
         tests:
           - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 600
+              strictly: true

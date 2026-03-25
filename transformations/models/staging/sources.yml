@@ -10,14 +10,21 @@ sources:
     tables:
       - name: nyc_taxi_yellow_trips
         description: "Viajes del taxi amarillo de NYC, cargados mensualmente"
+        # freshness check: warn if no new data in 1 day, error at 2 days
+        loaded_at_field: loaded_at
+        freshness:
+          warn_after: {count: 1, period: day}
+          error_after: {count: 2, period: day}
         columns:
           - name: tpep_pickup_datetime
             description: "Timestamp de inicio del viaje"
           - name: tpep_dropoff_datetime
             description: "Timestamp de fin del viaje"
           - name: total_amount
-            description: "Monto total cobrado al pasajero"
+            description: "Monto total cobrado al pasajero (NUMERIC para evitar drift de float)"
           - name: trip_distance
             description: "Distancia del viaje en millas"
           - name: source_file
             description: "Archivo parquet de origen (e.g. yellow_tripdata_2024-01.parquet)"
+          - name: loaded_at
+            description: "Timestamp de carga en el warehouse — usado para freshness checks"

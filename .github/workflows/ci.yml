@@ -39,12 +39,36 @@ jobs:
 
 
   # ──────────────────────────────────────────
-  # 2) dbt test against a real Postgres
+  # 2) Python unit tests
+  # ──────────────────────────────────────────
+  unit-test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pytest
+        run: pytest tests/ -v --cov=ingestion --cov-report=term-missing
+
+
+  # ──────────────────────────────────────────
+  # 3) dbt test against a real Postgres
   # ──────────────────────────────────────────
   dbt-test:
     name: dbt Test
     runs-on: ubuntu-latest
-    needs: lint
+    needs: unit-test
 
     services:
       postgres:
@@ -59,7 +83,7 @@ jobs:
           --health-cmd "pg_isready -U mdp"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
 
     steps:
       - name: Checkout code
@@ -80,11 +104,13 @@ jobs:
         run: |
           psql -h localhost -U mdp -d mdp_dw -f warehouse/schema.sql
 
-      - name: Seed minimal test data
+      - name: Seed test data (40+ days via generate_series)
         env:
           PGPASSWORD: mdp
         run: |
           psql -h localhost -U mdp -d mdp_dw << 'SQL'
+          -- Generate 2 rows per day for 41 days (Jan 1 – Feb 10 2024) = 82 rows.
+          -- Enough data for all window functions: LAG(7), 7-day moving avg, monthly RANK.
           INSERT INTO raw.nyc_taxi_yellow_trips (
             vendor_id, tpep_pickup_datetime, tpep_dropoff_datetime,
             passenger_count, trip_distance, ratecode_id, store_and_fwd_flag,
@@ -92,11 +118,43 @@ jobs:
             fare_amount, extra, mta_tax, tip_amount, tolls_amount,
             improvement_surcharge, total_amount, congestion_surcharge,
             airport_fee, source_file
-          ) VALUES
-            (1, '2024-01-15 08:00:00', '2024-01-15 08:20:00', 2, 3.5, 1, 'N', 100, 200, 1, 14.0, 0.5, 0.5, 3.0, 0.0, 0.3, 18.3, 2.5, 0.0, 'yellow_tripdata_2024-01.parquet'),
-            (2, '2024-01-15 09:00:00', '2024-01-15 09:15:00', 1, 2.1, 1, 'N', 150, 250, 2, 10.0, 0.5, 0.5, 0.0, 0.0, 0.3, 11.3, 2.5, 0.0, 'yellow_tripdata_2024-01.parquet'),
-            (1, '2024-01-16 10:00:00', '2024-01-16 10:30:00', 3, 5.0, 1, 'N', 100, 300, 1, 20.0, 0.5, 0.5, 4.0, 0.0, 0.3, 25.3, 2.5, 0.0, 'yellow_tripdata_2024-01.parquet');
+          )
+          SELECT
+            (1 + (n % 2))::int,
+            d + (n % 8 * interval '1 hour'),
+            d + (n % 8 * interval '1 hour') + ((10 + n % 25) * interval '1 minute'),
+            (1 + n % 4)::int,
+            round((1.5 + (n % 8) * 0.7)::numeric, 2),
+            1,
+            'N',
+            (100 + n % 50)::int,
+            (200 + n % 100)::int,
+            (1 + n % 2)::int,
+            round((7.0 + n % 18)::numeric, 2),
+            0.50,
+            0.50,
+            round(CASE WHEN n % 2 = 0 THEN (1.0 + n % 4) ELSE 0.0 END::numeric, 2),
+            0.00,
+            0.30,
+            round((7.0 + n % 18 + 1.3 + CASE WHEN n % 2 = 0 THEN (1.0 + n % 4) ELSE 0.0 END)::numeric, 2),
+            2.50,
+            0.00,
+            'yellow_tripdata_2024-' || LPAD(EXTRACT(MONTH FROM d)::text, 2, '0') || '.parquet'
+          FROM
+            generate_series('2024-01-01'::date, '2024-02-10'::date, '1 day'::interval) AS d,
+            generate_series(1, 2) AS n;
           SQL
+
+      - name: Install dbt packages
+        working-directory: transformations
+        run: |
+          dbt deps --profiles-dir .
+        env:
+          DBT_HOST: localhost
+          DBT_USER: mdp
+          DBT_PASSWORD: mdp
+          DBT_DBNAME: mdp_dw
+          DBT_PORT: "5432"
 
       - name: Run dbt
         working-directory: transformations
@@ -112,7 +170,7 @@ jobs:
       - name: Run dbt tests
         working-directory: transformations
         run: |
-          dbt test --profiles-dir .
+          dbt test --profiles-dir . --fail-fast
         env:
           DBT_HOST: localhost
           DBT_USER: mdp
@@ -128,8 +186,8 @@ jobs:
           echo "## dbt Test Results" >> $GITHUB_STEP_SUMMARY
           echo "| Status | Details |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| ✅ Models built | staging.stg_yellow_trips, marts.mart_trips_daily, marts.mart_trips_zone |" >> $GITHUB_STEP_SUMMARY
-          echo "| ✅ Tests run | 17 data quality tests |" >> $GITHUB_STEP_SUMMARY
+          echo "| ✅ Models built | staging.stg_yellow_trips, marts.mart_trips_daily, marts.mart_trips_zone, marts.mart_revenue_trends |" >> $GITHUB_STEP_SUMMARY
+          echo "| ✅ Tests run | not_null, unique, accepted_values, dbt_expectations range checks |" >> $GITHUB_STEP_SUMMARY
         env:
           DBT_HOST: localhost
           DBT_USER: mdp
@@ -139,12 +197,12 @@ jobs:
 
 
   # ──────────────────────────────────────────
-  # 3) Notify on failure — opens a GitHub Issue
+  # 4) Notify on failure — opens a GitHub Issue
   # ──────────────────────────────────────────
   notify-failure:
     name: Notify on Failure
     runs-on: ubuntu-latest
-    needs: [lint, dbt-test]
+    needs: [lint, unit-test, dbt-test]
     if: failure()
 
     steps:
@@ -164,6 +222,7 @@ jobs:
               ``,
               `### What to check`,
               `- Lint errors in \`ingestion/\` or \`dags/\``,
+              `- Unit test failures in \`tests/\``,
               `- dbt model compilation errors`,
               `- dbt test failures (data quality)`,
             ].join('\n');

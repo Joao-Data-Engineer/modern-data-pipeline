@@ -52,3 +52,46 @@ models:
         description: "Revenue total generado por la zona"
         tests:
           - not_null
+
+  - name: mart_revenue_trends
+    description: >
+      Tendencias de revenue diario con análisis de ventana temporal.
+      Construido sobre mart_trips_daily usando window functions (LAG, AVG OVER, RANK).
+      Responde: ¿está creciendo el negocio semana a semana?
+      ¿Qué días son outliers dentro del mes?
+      Materializado como TABLE.
+
+    columns:
+      - name: trip_date
+        description: "Fecha del viaje"
+        tests:
+          - not_null
+          - unique
+
+      - name: trips_7d_moving_avg
+        description: "Media móvil de viajes de los últimos 7 días"
+        tests:
+          - not_null
+
+      - name: revenue_7d_moving_avg
+        description: "Media móvil de revenue de los últimos 7 días"
+        tests:
+          - not_null
+
+      - name: trips_wow_growth_pct
+        description: "Crecimiento de viajes vs mismo día semana anterior (%)"
+
+      - name: revenue_wow_growth_pct
+        description: "Crecimiento de revenue vs mismo día semana anterior (%)"
+
+      - name: revenue_rank_in_month
+        description: "Ranking del día por revenue dentro de su mes (1 = mejor día)"
+        tests:
+          - not_null
+
+      - name: demand_trend
+        description: "Clasificación semántica: growing / stable / declining / insufficient_data"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['growing', 'stable', 'declining', 'insufficient_data']
